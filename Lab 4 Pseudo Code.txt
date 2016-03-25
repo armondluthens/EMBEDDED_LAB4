@@ -1,0 +1,65 @@
+
+.include "m88padef.inc"  ; Include Definitions for ATTiny45
+ .cseg
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;    Vector Table                                                ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ .org 0x000             ; RESET VECTOR
+	rjmp start
+
+.org 0x0002		        ; RPG INTERRUPT 
+	rjmp RPG_INTERRUPT  
+
+start:
+
+
+
+/**************************************************************
+   STATE 1: FREQUENCY METER MODE
+**************************************************************/
+BUTTON_STATE 1: FREQUENCY MEASUREMENT
+    
+    -LCD top line should display "Frequency Meter", and the frequency on the second line.
+    -Should display the measured frequency to at least four significant places 
+    (i.e 1.235 kHz as F = 1.235 kHz and not as F = 1235 Hz)
+
+/**************************************************************
+   STATE 2: VOLTMETER MODE
+**************************************************************/
+BUTTON_STATE 2: VOLTAGE MEASUREMENT
+    -LCD top line should display "Voltmeter" and the second line should display the voltage
+    -use controller's ADC to measure DC voltage
+
+/**************************************************************
+   ADC CONFIGURATION
+**************************************************************/
+// ADC Clock frequency: 250.000 kHz
+// ADC Voltage Reference: AVCC pin
+// ADC Auto Trigger Source: Free Running
+
+    #define ADC_VREF_TYPE ((0<<REFS1) | (1<<REFS0) | (0<<ADLAR));
+    ADMUX = ADC_VREF_TYPE;
+    ADCSRA = (1<<ADEN)|(0<<ADSC)|(1<<ADATE)|(0<<ADIF);
+    ADCSRA = ADCSRA |(0<<ADIE)|(1<<ADPS2)|(0<<ADPS1)|(1<<ADPS0);
+    ADCSRB=(0<<ADTS2)|(0<<ADTS1)|(0<<ADTS0);
+
+unsigned int read_adc(unsigned char adc_input){
+    ADMUX = adc_input|ADC_VREF_TYPE;
+    delay_us(10); // For stabilization of ADC input voltage
+    ADCSRA|=(1<<ADSC); // Start the AD conversion
+    while((ADCSRA&(1<<ADIF))==0) // Wait for AD conversion to complete
+    ;
+    ADCSRA|=(1<<ADIF);
+    return ADCW;
+}
+    
+/**************************************************************
+    ASSUMPTIONS:
+        -   assume the input frequency is a 0-5 V 
+            square wave with a 50% duty cycle.
+        -   Maximum frequency of the square wave will be 1 kHz 
+        -   Minimum frequency of the square wave will be 60 Hz
+        
+**************************************************************/
