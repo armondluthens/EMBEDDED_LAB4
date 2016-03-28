@@ -46,14 +46,13 @@ RESET:
 ; Messages in static memory
 ;--------------------------------
 
-; Note these have to be even number of characters, including 0x00 (stop character)
-volt_msg: .db "Voltmeter                              ", 0x00
-space: .db " ", 0x00
-freq_msg: .db "Frequency", 0x00
-volt_bot: .db "V =", 0x00
-freq_bot: .db "F =", 0x00
-volt_units: .db "V", 0x00		
-freq_units: .db "kHz", 0x00
+	volt_msg: .db "Voltmeter                              ", 0x00
+	space: .db " ", 0x00
+	freq_msg: .db "Frequency", 0x00
+	volt_bot: .db "V =", 0x00
+	freq_bot: .db "F =", 0x00
+	volt_units: .db "V", 0x00		
+	freq_units: .db "kHz", 0x00
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;                                   Initialization                                    ;
@@ -66,22 +65,24 @@ freq_units: .db "kHz", 0x00
 	rcall _delay_50ms
 
 ; Configure lower nibble of PORTC as output.
-   ldi   TMP,0x0F
-   out   DDRC,TMP
+	ldi   TMP,0x0F
+	out   DDRC,TMP
 
 ; Configure PB5-PB3 output.
-   ldi   TMP,0x38
-   out   DDRB,TMP
+	ldi   TMP,0x38
+	out   DDRB,TMP
 
 ; Initial Values
 ;--------------------
 	ldi STATE, 0x00   ; Arbitrarily start in voltage mode
 
-; Initialize LCD and Timers
+; Initialize LCD, Timer, and ADC
 ;-----------------------------
-	rcall LCD_Init  ; Initialize LCD
- 
+	rcall LCD_Init    ; Initialize LCD
+
 	rcall Timer_Init ; Initialize Timer
+
+	rcall ADC_Init   ; Initialize ADC
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;                                       Main Loop                                     ;
@@ -98,6 +99,15 @@ main:
 
 Timer_Init:
 
+	
+	ret
+
+ClearTimer:
+
+	ret
+
+LoadTimer:
+
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -108,8 +118,12 @@ Timer_Init:
 ; Button Interrupt
 ;---------------------------------------------------------------------------
 
-BUTTON:				; Uhh pretty sure we just have to change the state to Freqency and the timer interrupt will do the rest
-	STATE = 0x1
+BUTTON:		
+; Change STATE on overflow (V : 0 | F : 1)	
+	ldi TMP, 0x00
+	cpse STATE, TMP
+	ldi TMP, 0x1
+	mov STATE, TMP
 	reti
 
 ;--------------------
@@ -130,7 +144,27 @@ TIMER:
 	reti
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;                                   LCD   Functions                                   ;
+;                                   ADC Functions                                     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ADC_Init:
+
+; Set Clock to 1000kHz, turn ADC on and use Auto Trigger
+	ldi TMP, 0xAB	
+	sts ADCSRA, TMP
+
+;Set ADC on pin 1 and set VREF to AREF
+	ldi TMP, 0x41
+	sts ADCMUX, TMP
+
+; Set triggers to Timer1 OVF
+	ldi TMP, 0x03
+	sts ADCSRB, TMP
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                    LCD Functions                                    ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 LCD_Init:
@@ -205,10 +239,12 @@ DisplayCString:
    lpm   r0,Z+             
    tst   r0                
    breq  done
+
 ; Set, send and latch upper nibble
    swap  r0                
    out   PORTC,r0          
    rcall LCDStrobe
+
 ; Swap nibbles, send and latch lower nibble
    swap  r0                
    out   PORTC,r0          
@@ -218,14 +254,17 @@ DisplayCString:
    ret
 
 DisplayDString:
+
 ; Load program memory into r0 and test for end of message, post increment z
 	ld r0,Z+
  	tst r0 				
 	breq done_dsd
+
 ; Set, send, and latch upper nibble
 	swap r0 			
 	out PORTC,r0 		
 	rcall LCDStrobe 
+
 ; Swap nibbles, send and latch lower nibble
 	swap r0 			
 	out PORTC,r0 		
@@ -235,6 +274,7 @@ DisplayDString:
     ret
 
 DisplayChar:
+
 ; Send character stored in TMP
    swap  TMP    
    out   PORTC, TMP     ; Send upper nibble
@@ -245,19 +285,23 @@ DisplayChar:
    ret
 
 
-LoadVoltage:		
+LoadVoltage:
+
 ; Load 'Voltmeter' and display
 	ldi r30, LOW(2*volt_msg)
 	ldi r31, 2*HIGH(volt_msg)
 	rcall DisplayCString
 	rcall DisplaySpace
+
 ; Load 'V =' and display
 	ldi r30, LOW(2*volt_bot)
 	ldi r31, 2*HIGH(volt_bot)
 	rcall DisplayCString
+
 ; Get Voltage, format it, store it in SRAM and display it
 	rcall GetVoltage
 	rcall DisplayDString
+
 ; Load "V" and display
 	ldi r30, LOW(2*volt_units)
 	ldi r31, 2*HIGH(volt_units)
@@ -265,24 +309,29 @@ LoadVoltage:
 
 
 LoadFreq:  
+
 ; Load "Frequency" and display
 	ldi r30, LOW(2*freq_msg)
 	ldi r31, 2*HIGH(freq_msg)
 	rcall DisplayCString
 	rcall DisplaySpace
+
 ; Load "F =" and display
 	ldi r30, LOW(2*freq_bot)
 	ldi r31, 2*HIGH(freq_bot)
 	rcall DisplayCString
+
 ; Get Frequency, format it, store it in SRAM and display it
 	rcall GetFrequency
 	rcall DisplayDString
+
 ; Load "F" and display
 	ldi r30, LOW(2*freq_units)
 	ldi r31, 2*HIGH(freq_units)
 	ret
 
 DisplaySpace:
+; Write a space to pad odd strings
 	ldi r30, LOW(2*space)
 	ldi r31, 2*HIGH(space)
 	rcall DisplayCString
@@ -313,25 +362,31 @@ LCDStrobe:
 ;----------------
 
 GetVoltage:
+
 ; Reserve 6 bytes of RAM
 .dseg
 	dxtx: .DB 0x00,0x00,0x00,0x00,0x00,0x00
 .cseg
+
 ; Get voltage and load it in
-	mov dd16uL, r25 ; LSB of number to display
-	mov dd16uH, r26 ; MSB of number to display
+	lds dd16uL, ADCL ; LSB of number to display
+	lds dd16uH, ADCH ; MSB of number to display
 
 	ldi dv16uL,low(10)
 	ldi dv16uH,high(10)
 
 ; Store terminating for the string.
 	ldi TMP,0x00 ; Terminating NULL
-	sts dtxt+4, TMP ; Store in RAM
+	sts dtxt+5, TMP ; Store in RAM
+
 ; Divide the number by 10 and format remainder.
 	rcall div16u ; Result: r17:r16, rem: r15:r14
 	ldi TMP, 0x30
 	add drem16uL, TMP ; Convert to ASCII
 	sts dtxt+3,drem16uL ; Store in RAM
+	sts dtxt+4, drem16uH
+
+
 ; Generate decimal point.
 	ldi TMP,0x2e ; ASCII code for .
 	sts dtxt+2,TMP ; Store in RAM
@@ -347,8 +402,8 @@ GetFreq:
 .cseg   
 ; HERE NEED TO READ IN FREQUENCY
 
-	mov dd16uL,r25 ; LSB of number to display
-	mov dd16uH,r26 ; MSB of number to display
+	mov dd16uL, r25 ; LSB of number to display
+	mov dd16uH, r26 ; MSB of number to display
 
 	ldi dv16uL,low(10)
 	ldi dv16uH,high(10)
@@ -419,7 +474,8 @@ _delay:
 ;   Division 
 ;-------------------
 
-div16u:	clr	drem16uL	;clear remainder Low byte
+div16u:	
+    clr	drem16uL	;clear remainder Low byte
 	sub	drem16uH,drem16uH;clear remainder High byte and carry
 
 	rol	dd16uL		;shift left dividend

@@ -33,8 +33,8 @@
 	ldi TMP, 0x0F	; PC0-PC3 is output (Data Lines)
 	out DDRC, TMP
 
-	ldi   r23,0x38   ; Configure PB5-PB3 output. PB3 is RS and PB5 is Enable
-	out   DDRB,r23
+	ldi   TMP,0x38   ; Configure PB5-PB3 output. PB3 is RS and PB5 is Enable
+	out   DDRB,TMP
 
 ;-----------------
 ; Initialization |
@@ -42,18 +42,9 @@
 
 ; Initial delay of ~ 50ms
 	rcall InitDelay
+
 ; Initialize LCD
 	rcall LCD_Init 
-
-; Load "Voltmeter" and display
-	ldi r30, LOW(2*volt_msg)
-	ldi r31, 2*HIGH(volt_msg)
-	rcall DisplayCString
-	rcall SecondLine
-; Load 'V =' and display
-	ldi r30, LOW(2*volt_bot)
-	ldi r31, 2*HIGH(volt_bot)
-	rcall DisplayCString
 
 main:
 ; Loop forever
