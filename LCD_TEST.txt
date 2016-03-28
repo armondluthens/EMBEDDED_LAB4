@@ -1,0 +1,196 @@
+; LCD TEST
+
+.include "m88padef.inc"
+.cseg
+.org 0x00
+
+;----------------------------
+; Messages in static memory |
+;----------------------------
+
+; Note these have to be even number of characters, including 0x00 (stop character)
+
+	volt_msg: .db "Voltmeter", 0x00
+	freq_msg: .db "Frequency", 0x00
+	volt_bot: .db "V =", 0x00
+	freq_bot: .db "F =", 0x00
+	volt_units: .db "V", 0x00		
+	freq_units: .db "kHz", 0x00
+
+;------------------
+; Alias Registers |
+;------------------
+
+; Variable Registers
+	.def TMP = r16
+
+
+;------
+; I/O |
+;------
+
+; Set output lines
+	ldi TMP, 0x0F	; PC0-PC3 is output (Data Lines)
+	out DDRC, TMP
+
+	ldi   r23,0x38   ; Configure PB5-PB3 output. PB3 is RS and PB5 is Enable
+	out   DDRB,r23
+
+;-----------------
+; Initialization |
+;-----------------
+
+; Initial delay of ~ 50ms
+	rcall InitDelay
+; Initialize LCD
+	rcall LCD_Init 
+
+; Load "Voltmeter" and display
+	ldi r30, LOW(2*volt_msg)
+	ldi r31, 2*HIGH(volt_msg)
+	rcall DisplayCString
+	rcall SecondLine
+; Load 'V =' and display
+	ldi r30, LOW(2*volt_bot)
+	ldi r31, 2*HIGH(volt_bot)
+	rcall DisplayCString
+
+main:
+; Loop forever
+	nop
+	rjmp loop
+
+LCD_Init:
+   push  TMP
+   cbi   PORTB,5     ; Pull RS line low.
+   rcall Delay100
+
+; Initialze.
+   ldi   TMP,0x03
+   out   PORTC, TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+   rcall Delay100
+
+   ldi   TMP,0x03
+   out   PORTC, TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+   ldi   TMP,0x03
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Set 4-bit mode,2 lines
+   ldi   TMP,0x02
+   out   PORTC, TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Function set (0x28): 2 lines, 5x7 font.
+   ldi   TMP,0x02
+   out   PORTC,TMP
+   rcall LCDStrobe
+   ldi   TMP,0x08
+   out   PORTC,TMP
+   rcall LCDStrobe
+
+; Clear display (0x01). Note the additional delay,
+; since this can take up to 1.6 ms to complete.
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe
+   ldi   TMP,0x01
+   out   PORTC,TMP
+   rcall LCDStrobe
+   rcall Delay100
+
+; Cursor + display.
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+   ldi   TMP,0x0C
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Cursor increment. (0x06):
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe  ; Strobe Enable line 
+   ldi   TMP,0x06
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Switch to LCD Data mode.
+   sbi   PORTB,5     ; Pull RS line high.
+   rcall Delay100
+   pop   TMP
+   ret
+
+
+DisplayCString:
+; r0 <-- first byte, check if end of message
+   lpm   r0,Z+             
+   tst   r0                
+   breq  done
+
+; Swap and send out upper nibble, latch with LCD Strobe
+   swap  r0                
+   out   PORTC,r0          
+   rcall LCDStrobe
+
+; Swap and send out lower nibble, latch with LCD Strobe
+   swap  r0                
+   out   PORTC,r0         
+   rcall LCDStrobe     
+   rjmp  displayCstring
+   done:
+   ret
+
+SecondLine:
+; Set LCD cursor to beginning of second line
+	; cbi PORTB, 3
+	; sbi PORTB, 
+	ret
+
+LCDStrobe:
+; Toggle LCD with 40 microsecond delay
+	sbi PORTB, 4
+	rcall Delay40u 
+	cbi PORTB, 4
+	ret
+
+Delay40u:
+; delaying 318 cycles:
+    ldi  R17, $6A
+	WGLOOP0:  dec  R17
+    brne WGLOOP0
+; ----------------------------- 
+; delaying 2 cycles:
+	nop
+	nop
+	ret
+
+Delay100:
+; delaying 798 cycles:
+	ldi  R17, $02
+	WGLOOP0:  ldi  R18, $84
+	WGLOOP1:  dec  R18
+	brne WGLOOP1
+	dec  R17
+	brne WGLOOP0
+; ----------------------------- 
+; delaying 2 cycles:
+          nop
+          nop
+	ret
+
+InitDelay: 
+; delaying 39999 cycles:   ~ 50 ms total
+	ldi  R17, $43
+	WGLOOP0:  ldi  R18, $C6
+	WGLOOP1:  dec  R18
+	brne WGLOOP1
+	dec  R17
+	brne WGLOOP0
+; ----------------------------- 
+; delaying 1 cycle:
+          nop
+	ret

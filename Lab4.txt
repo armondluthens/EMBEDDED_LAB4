@@ -1,0 +1,635 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;        Lab 4 - Simple Multimeter       ;
+;    Armond Luthens and Charles Rathe    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.include "m88padef.inc"      ; Include definitions for bigger board
+.dseg
+	dtxt: .DB 0x00,0x00,0x00,0x00,0x00,0x00
+
+.cseg
+
+;-----------------------------------;
+; ISR Vector Table                  ;
+;-----------------------------------;
+.org 0x0000                         ;
+	rjmp RESET    ; Reset ISR       ;
+;-----------------------------------;
+.org 0x0001                         ;
+	rjmp BUTTON   ; INT Button ISR  ;
+;-----------------------------------;
+.org 0x0005                         ;
+	rjmp TIMER    ; TMR_OVF ISR     ;
+;-----------------------------------;
+
+RESET:
+
+; Register Aliasing
+;-----------------------
+
+; Variable Registers
+	.def outputL = r14
+	.def outputH = r15
+	.def STATE = r16    ; Register to hold if it's voltage or frequency state (0 is voltage, 1 is freq)
+	.def TMP = r17      ; Register for holding temporary variables
+; Division Registers
+	.def drem16uL = r18 ; Registers for division
+	.def drem16uH = r19
+	.def dres16uL = r20
+	.def dres16uH = r21
+	.def dd16uL = r22
+	.def dd16uH = r23
+	.def dv16uL = r24
+	.def dv16uH = r25
+	.def dcnt16u =r26
+
+; Messages in static memory
+;--------------------------------
+
+; Note these have to be even number of characters, including 0x00 (stop character)
+volt_msg: .db "Voltmeter                              ", 0x00
+space: .db " ", 0x00
+freq_msg: .db "Frequency", 0x00
+volt_bot: .db "V =", 0x00
+freq_bot: .db "F =", 0x00
+volt_units: .db "V", 0x00		
+freq_units: .db "kHz", 0x00
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                   Initialization                                    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Configure I/O
+;-----------------------------------------------------
+
+; Initial Delay
+	rcall _delay_50ms
+
+; Configure lower nibble of PORTC as output.
+   ldi   TMP,0x0F
+   out   DDRC,TMP
+
+; Configure PB5-PB3 output.
+   ldi   TMP,0x38
+   out   DDRB,TMP
+
+; Initial Values
+;--------------------
+	ldi STATE, 0x00   ; Arbitrarily start in voltage mode
+
+; Initialize LCD and Timers
+;-----------------------------
+	rcall LCD_Init  ; Initialize LCD
+ 
+	rcall Timer_Init ; Initialize Timer
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                       Main Loop                                     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+main:
+	; Do nothing but wait for overflows
+	rjmp main
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                   Timer Functions                                   ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+Timer_Init:
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                  Interrupt Functions                                ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;---------------------
+; Button Interrupt
+;---------------------------------------------------------------------------
+
+BUTTON:				; Uhh pretty sure we just have to change the state to Freqency and the timer interrupt will do the rest
+	STATE = 0x1
+	reti
+
+;--------------------
+; Timer Interrupt
+;----------------------------------------------------------------------------
+
+TIMER:   
+
+	cli
+
+	rcall LCD_Init
+
+	cpi STATE, 0x0        ; If in voltage state, set top line as "voltmeter"
+	breq load_voltage     ; Otherwise set it to "Frequency"
+	rcall load_freq
+
+	sei
+	reti
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                   LCD   Functions                                   ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+LCD_Init:
+; Save TMP to stack and pull RS low
+ 	push  TMP
+    cbi   PORTB,5     ; Pull RS line low.
+    rcall _delay_100u
+
+; Initialze.
+   ldi   TMP,0x03
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+   rcall _delay_5ms
+
+   ldi   TMP,0x03
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+   ldi   TMP,0x03
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Set 4-bit mode,2 lines
+   ldi   TMP,0x02
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Function set (0x28): 2 lines, 5x7 font.
+   ldi   TMP,0x02
+   out   PORTC,TMP
+   rcall LCDStrobe
+   ldi   TMP,0x08
+   out   PORTC,TMP
+   rcall LCDStrobe 
+
+; Clear display (0x01). Note the additional delay,
+; since this can take up to 1.6 ms to complete.
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe 
+   ldi   TMP,0x01
+   out   PORTC,TMP
+   rcall LCDStrobe 
+   rcall _delay_5ms
+
+; Cursor + display.
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+   ldi   TMP,0x0C
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Cursor increment. (0x06):
+   ldi   TMP,0x00
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+   ldi   TMP,0x06
+   out   PORTC,TMP
+   rcall LCDStrobe   ; Strobe Enable line 
+
+; Switch to LCD Data mode.
+   sbi   PORTB,5     ; Pull RS line high.
+   rcall _delay_100u
+   pop   TMP 
+   ret
+
+;---------------------------------------------------------------------------------------
+
+DisplayCString:
+; Load program memory into r0 and test for end of message, post increment z
+   lpm   r0,Z+             
+   tst   r0                
+   breq  done
+; Set, send and latch upper nibble
+   swap  r0                
+   out   PORTC,r0          
+   rcall LCDStrobe
+; Swap nibbles, send and latch lower nibble
+   swap  r0                
+   out   PORTC,r0          
+   rcall LCDStrobe         
+   rjmp  displayCstring
+   done:
+   ret
+
+DisplayDString:
+; Load program memory into r0 and test for end of message, post increment z
+	ld r0,Z+
+ 	tst r0 				
+	breq done_dsd
+; Set, send, and latch upper nibble
+	swap r0 			
+	out PORTC,r0 		
+	rcall LCDStrobe 
+; Swap nibbles, send and latch lower nibble
+	swap r0 			
+	out PORTC,r0 		
+	rcall LCDStrobe 	
+	rjmp DisplayDString
+	done_dsd:
+    ret
+
+DisplayChar:
+; Send character stored in TMP
+   swap  TMP    
+   out   PORTC, TMP     ; Send upper nibble
+   rcall LCDStrobe      ; Strobe Enable line 
+   swap  TMP
+   out   PORTC,TMP     ; Send lower nibble
+   rcall LCDStrobe      ; Strobe Enable line 
+   ret
+
+
+LoadVoltage:		
+; Load 'Voltmeter' and display
+	ldi r30, LOW(2*volt_msg)
+	ldi r31, 2*HIGH(volt_msg)
+	rcall DisplayCString
+	rcall DisplaySpace
+; Load 'V =' and display
+	ldi r30, LOW(2*volt_bot)
+	ldi r31, 2*HIGH(volt_bot)
+	rcall DisplayCString
+; Get Voltage, format it, store it in SRAM and display it
+	rcall GetVoltage
+	rcall DisplayDString
+; Load "V" and display
+	ldi r30, LOW(2*volt_units)
+	ldi r31, 2*HIGH(volt_units)
+	ret
+
+
+LoadFreq:  
+; Load "Frequency" and display
+	ldi r30, LOW(2*freq_msg)
+	ldi r31, 2*HIGH(freq_msg)
+	rcall DisplayCString
+	rcall DisplaySpace
+; Load "F =" and display
+	ldi r30, LOW(2*freq_bot)
+	ldi r31, 2*HIGH(freq_bot)
+	rcall DisplayCString
+; Get Frequency, format it, store it in SRAM and display it
+	rcall GetFrequency
+	rcall DisplayDString
+; Load "F" and display
+	ldi r30, LOW(2*freq_units)
+	ldi r31, 2*HIGH(freq_units)
+	ret
+
+DisplaySpace:
+	ldi r30, LOW(2*space)
+	ldi r31, 2*HIGH(space)
+	rcall DisplayCString
+	ret
+
+;--------------------------
+; Control Line Functions
+;--------------------------
+
+LCDStrobe:
+; Toggle Enable line with ~40us delay
+   cbi   PORTB,3     ; E-line low
+   sbi   PORTB,3     ; Make E-Line high
+   nop               ; 125 ns
+   nop               ; 125 ns
+   nop               ; 125 ns
+   cbi   PORTB,3     ; Pull E line low
+   rcall _delay_100u ; Wait 100 us
+   ret
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                  Delays/Helpers                                     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;----------------
+; ADC Functions
+;----------------
+
+GetVoltage:
+; Reserve 6 bytes of RAM
+.dseg
+	dxtx: .DB 0x00,0x00,0x00,0x00,0x00,0x00
+.cseg
+; Get voltage and load it in
+	mov dd16uL, r25 ; LSB of number to display
+	mov dd16uH, r26 ; MSB of number to display
+
+	ldi dv16uL,low(10)
+	ldi dv16uH,high(10)
+
+; Store terminating for the string.
+	ldi TMP,0x00 ; Terminating NULL
+	sts dtxt+4, TMP ; Store in RAM
+; Divide the number by 10 and format remainder.
+	rcall div16u ; Result: r17:r16, rem: r15:r14
+	ldi TMP, 0x30
+	add drem16uL, TMP ; Convert to ASCII
+	sts dtxt+3,drem16uL ; Store in RAM
+; Generate decimal point.
+	ldi TMP,0x2e ; ASCII code for .
+	sts dtxt+2,TMP ; Store in RAM
+
+	ret
+
+GetFreq:
+
+; Reserve 6 bytes of RAM
+.dseg
+   dtxt:  .DB 0x00,0x00,0x00,0x00,0x00,0x00
+
+.cseg   
+; HERE NEED TO READ IN FREQUENCY
+
+	mov dd16uL,r25 ; LSB of number to display
+	mov dd16uH,r26 ; MSB of number to display
+
+	ldi dv16uL,low(10)
+	ldi dv16uH,high(10)
+; Store terminating for the string.
+	ldi r20,0x00 ; Terminating NULL
+	sts dtxt+4,r20 ; Store in RAM
+; Divide the number by 10 and format remainder.
+	rcall div16u ; Result: r17:r16, rem: r15:r14
+	ldi r20,0x30
+	add r14,r20 ; Convert to ASCII
+	sts dtxt+3,r14 ; Store in RAM
+; Generate decimal point.
+	ldi r20,0x2e ; ASCII code for .
+	sts dtxt+2,r20 ; Store in RAM
+
+	ret
+
+;-----------
+; Delays
+;-----------
+_delay_100u:
+; Delay 100us
+   push  r23
+   ldi   r23,98
+   rcall _delay   
+   pop   r23
+   ret
+
+_delay_5ms:
+; 5ms Delay
+   push  r24
+   push  r23
+   ldi   r24,20
+	L10:
+	ldi   r23,250
+	rcall _delay
+	dec   r24
+	brne  L10
+	pop   r23
+	pop   r24     
+	ret
+
+
+_delay_50ms:
+; 50ms Delay
+	push  r24
+	ldi   r24,10
+	w10:   
+	rcall _delay_5ms
+	dec   r24
+	brne  w10
+	pop   r24
+	ret
+
+
+_delay: 
+; Delay for Enable          
+   dec   r23      ; 1 cycle
+   nop            ; 1 cycle
+   nop            ; 1 cycle
+   nop            ; 1 cycle
+   nop            ; 1 cycle
+   nop            ; 1 cycle
+   brne  _delay   ; 1/2 cycles
+   nop            ; 1 cycle
+   ret            ; 4 cycles
+
+;   Division 
+;-------------------
+
+div16u:	clr	drem16uL	;clear remainder Low byte
+	sub	drem16uH,drem16uH;clear remainder High byte and carry
+
+	rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_1		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_2		;else
+d16u_1:	sec			;    set carry to be shifted into result
+
+d16u_2:	rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_3		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_4		;else
+d16u_3:	sec			;    set carry to be shifted into result
+
+d16u_4:	rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_5		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_6		;else
+d16u_5:	sec			;    set carry to be shifted into result
+
+d16u_6:	rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_7		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_8		;else
+d16u_7:	sec			;    set carry to be shifted into result
+
+d16u_8:	rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_9		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_10		;else
+d16u_9:	sec			;    set carry to be shifted into result
+
+d16u_10:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_11		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_12		;else
+d16u_11:sec			;    set carry to be shifted into result
+
+d16u_12:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_13		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_14		;else
+d16u_13:sec			;    set carry to be shifted into result
+
+d16u_14:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_15		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_16		;else
+d16u_15:sec			;    set carry to be shifted into result
+
+d16u_16:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_17		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_18		;else
+d16u_17:	sec			;    set carry to be shifted into result
+
+d16u_18:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_19		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_20		;else
+d16u_19:sec			;    set carry to be shifted into result
+
+d16u_20:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_21		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_22		;else
+d16u_21:sec			;    set carry to be shifted into result
+
+d16u_22:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_23		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_24		;else
+d16u_23:sec			;    set carry to be shifted into result
+
+d16u_24:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_25		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_26		;else
+d16u_25:sec			;    set carry to be shifted into result
+
+d16u_26:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_27		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_28		;else
+d16u_27:sec			;    set carry to be shifted into result
+
+d16u_28:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_29		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_30		;else
+d16u_29:sec			;    set carry to be shifted into result
+
+d16u_30:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	rol	drem16uL	;shift dividend into remainder
+	rol	drem16uH
+	sub	drem16uL,dv16uL	;remainder = remainder - divisor
+	sbc	drem16uH,dv16uH	;
+	brcc	d16u_31		;if result negative
+	add	drem16uL,dv16uL	;    restore remainder
+	adc	drem16uH,dv16uH
+	clc			;    clear carry to be shifted into result
+	rjmp	d16u_32		;else
+d16u_31:sec			;    set carry to be shifted into result
+
+d16u_32:rol	dd16uL		;shift left dividend
+	rol	dd16uH
+	ret
