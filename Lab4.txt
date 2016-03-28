@@ -255,6 +255,10 @@ DisplayCString:
 
 DisplayDString:
 
+; Load formatted string
+	ldi r30, LOW(2*dtxt)
+	ldi r31, 2*HIGH(dtxt)
+
 ; Load program memory into r0 and test for end of message, post increment z
 	ld r0,Z+
  	tst r0 				
